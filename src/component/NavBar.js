@@ -16,7 +16,7 @@ const Navbar = () => {
 
   return (
     <nav className="flex justify-between items-center p-4 bg-gray-900 text-white">
-      <Link to="/" className="font-bold text-lg">📝 NotesApp</Link>
+      <h4 className="font-bold text-lg">NotesApp</h4>
 
       {!user ? (
         <div className="space-x-4">

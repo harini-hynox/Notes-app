@@ -24,7 +24,7 @@ const Login = () => {
     setLoading(false);
 
     if (error) {
-      console.error("Supabase login error:", error); // Debugging
+      console.error("Supabase login error:", error); 
       toast.error(error.message);
     } else if (data?.user) {
       toast.success("Login successful!");

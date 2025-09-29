@@ -1,15 +1,31 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "./../AuthContext";
 import { supabase } from "./../supabaseClient";
+import { toast } from "react-toastify"; // ✅ for notifications
+import "react-toastify/dist/ReactToastify.css";
 
 const ProfileDropdown = () => {
   const { user } = useAuth();
   const [username, setUsername] = useState("");
-  const [avatarUrl, setAvatarUrl] = useState(null);
+  const [avatarPath, setAvatarPath] = useState(null); // store only file path in DB
+  const [avatarUrl, setAvatarUrl] = useState(null);   // signed URL for display
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
 
-  // Load profile data
+  // ✅ Helper to generate signed URL
+  const generateSignedUrl = async (path) => {
+    if (!path) return null;
+    const { data, error } = await supabase.storage
+      .from("profile-pic")
+      .createSignedUrl(path, 3600); // 1 hour
+    if (error) {
+      console.error("Signed URL error:", error);
+      return null;
+    }
+    return data.signedUrl;
+  };
+
+  // ✅ Load profile (always regenerates signed URL)
   useEffect(() => {
     if (!user) return;
 
@@ -20,17 +36,36 @@ const ProfileDropdown = () => {
         .eq("id", user.id)
         .single();
 
+      if (error) {
+        console.error("Error loading profile:", error);
+        return;
+      }
+
       if (data) {
         setUsername(data.username || "");
-        setAvatarUrl(data.avatar_url || null);
+        setAvatarPath(data.avatar_url || null);
+
+        if (data.avatar_url) {
+          const signedUrl = await generateSignedUrl(data.avatar_url);
+          setAvatarUrl(signedUrl);
+        }
       }
-      if (error) console.error("Error loading profile:", error);
     };
 
     fetchProfile();
   }, [user]);
 
-  // Handle image selection
+  // ✅ Refresh signed URL every 55 mins (before expiry)
+  useEffect(() => {
+    if (!avatarPath) return;
+    const interval = setInterval(async () => {
+      const signedUrl = await generateSignedUrl(avatarPath);
+      setAvatarUrl(signedUrl);
+    }, 55 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [avatarPath]);
+
+  // ✅ Handle file selection
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
     setFile(selectedFile);
@@ -43,7 +78,7 @@ const ProfileDropdown = () => {
     }
   };
 
-  // Upload avatar to Supabase
+  // ✅ Upload avatar
   const uploadAvatar = async () => {
     if (!file || !user) return;
 
@@ -54,29 +89,43 @@ const ProfileDropdown = () => {
 
     if (uploadError) {
       console.error("Upload error:", uploadError);
+      toast.error("❌ Failed to upload avatar");
       return;
     }
 
-    const { data } = supabase.storage.from("profile-pic").getPublicUrl(filePath);
-
+    // Save file path (not signed URL) in DB
     const { error: dbError } = await supabase
       .from("notes-profile")
-      .upsert({ id: user.id, username, avatar_url: data.publicUrl });
+      .upsert({ id: user.id, username, avatar_url: filePath });
 
-    if (dbError) console.error("DB error:", dbError);
+    if (dbError) {
+      console.error("DB error:", dbError);
+      toast.error("❌ Failed to save avatar in profile");
+      return;
+    }
 
-    setAvatarUrl(data.publicUrl);
+    // Show immediately with signed URL
+    const signedUrl = await generateSignedUrl(filePath);
+    setAvatarPath(filePath);
+    setAvatarUrl(signedUrl);
     setFile(null);
     setPreviewUrl(null);
+
+    toast.success("✅ Avatar updated successfully!");
   };
 
-  // Save username only
+  // ✅ Save username only
   const saveProfile = async () => {
     if (!user) return;
     const { error } = await supabase
       .from("notes-profile")
-      .upsert({ id: user.id, username, avatar_url: avatarUrl });
-    if (error) console.error("Save error:", error);
+      .upsert({ id: user.id, username, avatar_url: avatarPath }); // save path only
+    if (error) {
+      console.error("Save error:", error);
+      toast.error("❌ Failed to save profile");
+    } else {
+      toast.success("✅ Profile updated successfully!");
+    }
   };
 
   return (
@@ -87,27 +136,16 @@ const ProfileDropdown = () => {
       {/* Avatar Preview */}
       <div className="flex flex-col items-center mb-4">
         {previewUrl ? (
-          <img
-            src={previewUrl}
-            alt="preview"
-            className="w-20 h-20 rounded-full object-cover mb-2"
-          />
+          <img src={previewUrl} alt="preview" className="w-20 h-20 rounded-full object-cover mb-2" />
         ) : avatarUrl ? (
-          <img
-            src={avatarUrl}
-            alt="avatar"
-            className="w-20 h-20 rounded-full object-cover mb-2"
-          />
+          <img src={avatarUrl} alt="avatar" className="w-20 h-20 rounded-full object-cover mb-2" />
         ) : (
           <div className="w-20 h-20 bg-gray-300 rounded-full flex items-center justify-center mb-2">
             <span className="text-gray-600">No Img</span>
           </div>
         )}
 
-        {/* File chosen message */}
-        <p className="text-sm text-gray-500 mb-1">
-          {file ? file.name : "No file chosen"}
-        </p>
+        
 
         {/* Hidden file input */}
         <input
